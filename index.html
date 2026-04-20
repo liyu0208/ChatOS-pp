@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Chat OS Modular</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.prod.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="css/chat.css">
+    <link rel="stylesheet" href="css/diary.css">
+</head>
+<!-- 泡泡特效背景与画布 -->
+<canvas id="burst-canvas"></canvas>
+<div class="bubbles-wrap" id="bubblesWrap"></div>
+<body>
+<div id="app">
+    <div class="toast-container absolute top-5 left-1/2 -translate-x-1/2 z-[9999] pointer-events-none">
+        <transition-group name="toast">
+            <div v-for="t in toasts" :key="t.id" class="toast-msg bg-black/80 text-white px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 mb-2">
+                <i v-if="t.type==='success'" class="fas fa-check-circle text-green-400"></i>
+                <i v-if="t.type==='error'" class="fas fa-times-circle text-red-400"></i>
+                {{ t.msg }}
+            </div>
+        </transition-group>
+    </div>
+
+    <input ref="globalChatInput" type="file" accept=".json" class="hidden-input" @change="importChatHistory">
+    <input ref="globalCardInput" type="file" accept=".json,.png" class="hidden-input" @change="importCharacterCard">
+    <input ref="globalCssInput" type="file" accept=".css,.txt" class="hidden-input" @change="importCssFile">
+    <input id="hidden-world-input" type="file" accept=".json" class="hidden-input" @change="importWorldFile">
+    <input ref="globalStickerInput" type="file" accept="image/*" class="hidden-input" @change="addCustomSticker">
+    <input ref="globalChatImgInput" type="file" accept="image/*" class="hidden-input" @change="sendImage">
+    <input ref="globalDiaryImgInput" type="file" accept="image/*" class="hidden-input" @change="addDiaryImage">
+    <input ref="roleAvatarInput" type="file" accept="image/*" class="hidden-input" @change="e=>updateChatAvatar(e, 'role')">
+    <input ref="userAvatarInput" type="file" accept="image/*" class="hidden-input" @change="e=>updateChatAvatar(e, 'user')">
+    <input ref="userPersonaInput" type="file" accept=".txt,.json" class="hidden-input" @change="importUserPersona">
+    <input ref="stickerFileInput" type="file" accept="image/*" class="hidden-input" @change="handleStickerFile">
+    <input ref="widget1Input" type="file" accept="image/*" class="hidden-input" @change="e => uploadWidgetImg(e, 1)">
+    <input ref="widget2Input" type="file" accept="image/*" class="hidden-input" @change="e => uploadWidgetImg(e, 2)">
+    <input id="custom-icon-upload" type="file" accept="image/*" class="hidden-input" @change="handleCustomIconUpload">
+
+    <!-- 顶部系统栏 -->
+    <div v-if="currentApp === 'home' || (currentApp === 'chatApp' && currentChatId)" class="sys-text absolute top-0 w-full z-[100] flex justify-between px-6 py-4 text-xs font-bold pointer-events-none transition-colors">
+        <span>{{ currentTime }}</span>
+        <div class="flex gap-2 items-center">
+            <i class="fas fa-signal"></i><i class="fas fa-wifi"></i>
+            <div class="flex items-center">
+                <div class="sys-border relative w-8 h-3.5 border rounded-[3px] p-[1px] flex items-center ml-1 transition-colors">
+                    <div class="sys-bg h-full transition-all duration-500 rounded-[1px]" :style="{width: batteryLevel + '%'}"></div>
+                    <div class="absolute inset-0 flex items-center justify-center text-[8px] font-bold scale-90" style="color: inherit; filter: invert(1) grayscale(1) contrast(9);">{{ batteryLevel }}</div>
+                </div>
+                <div class="sys-bg w-[2px] h-1.5 rounded-r-[1px] transition-colors"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 1. 桌面 ================= -->
+    <div v-if="currentApp === 'home'" class="wallpaper-bg" style="display:flex; flex-direction:column; height:100%; overflow:hidden;" @touchstart="onHomeTouchStart" @touchend="onHomeTouchEnd">
+        <div class="flex-1 relative w-full transition-transform duration-300 ease-out flex" :style="`transform: translateX(-${homePage * 100}%)`">
+            <div class="w-full shrink-0 flex flex-col h-full px-5 pt-12">
+                <div class="text-center shrink-0 mb-6 mt-4">
+                    <div class="text-7xl font-thin tracking-tighter sys-text drop-shadow-md">{{ currentTime }}</div>
+                    <div class="text-lg opacity-80 mt-2 font-medium sys-text drop-shadow">{{ currentDate }}</div>
+                </div>
+                <div class="flex gap-4">
+                    <div class="w-1/2 grid grid-cols-2 gap-y-5 gap-x-3 content-start">
+                       <div @click="openApp('diary'); handleBubblePop($event, '📖 打开日记', '#f59e0b')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+                            <div class="app-icon bg-gradient-to-b from-amber-400 to-orange-400"><img v-if="store.customIcons.diary" :src="store.customIcons.diary" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-book-open"></i></div><span class="app-name">日记</span>
+                        </div>
+                        <div @click="openApp('theme')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+                            <div class="app-icon bg-gradient-to-b from-pink-400 to-pink-600"><img v-if="store.customIcons.theme" :src="store.customIcons.theme" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-paint-brush"></i></div><span class="app-name">美化</span>
+                        </div>
+                        <div @click="openApp('world')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+                            <div class="app-icon bg-gradient-to-b from-purple-400 to-purple-600"><img v-if="store.customIcons.world" :src="store.customIcons.world" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-globe-asia"></i></div><span class="app-name">世界书</span>
+                        </div>
+                        <div @click="showToast('相册功能开发中...')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+                            <div class="app-icon bg-gradient-to-b from-blue-400 to-blue-500"><img v-if="store.customIcons.album" :src="store.customIcons.album" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-images"></i></div><span class="app-name">相册</span>
+                        </div>
+                    </div>
+                    <div class="w-1/2 h-44 bg-white/20 backdrop-blur-md rounded-3xl border border-white/40 overflow-hidden relative shadow-lg cursor-pointer active:scale-95 transition-transform" @click="$refs.widget1Input.click()">
+                        <img v-if="store.widgets.page1Img" :src="store.widgets.page1Img" class="w-full h-full object-cover">
+                        <div v-else class="flex flex-col items-center justify-center h-full sys-text font-bold opacity-70"><i class="fas fa-plus text-2xl mb-2"></i><span class="text-xs">添加相片</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="w-full shrink-0 px-6 flex flex-col h-full pt-20">
+                <div class="h-32 bg-white/20 backdrop-blur-md rounded-3xl border border-white/40 p-3 relative overflow-hidden shadow-lg flex gap-3 mb-8">
+                    <div class="w-1/3 h-full bg-white/30 rounded-2xl overflow-hidden flex items-center justify-center cursor-pointer active:scale-95" @click="$refs.widget2Input.click()">
+                        <img v-if="store.widgets.page2Img" :src="store.widgets.page2Img" class="w-full h-full object-cover">
+                        <i v-else class="fas fa-camera sys-text opacity-50 text-xl"></i>
+                    </div>
+                    <textarea v-model="store.widgets.page2Text" @change="saveAllManual" class="flex-1 bg-transparent resize-none outline-none sys-text font-bold text-sm leading-relaxed" placeholder="写点什么..."></textarea>
+                </div>
+                <div class="grid grid-cols-4 gap-4">
+                    <div @click="showToast('敬请期待')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+
+<div @click="currentApp='bubbleApp'; handleBubblePop($event, '🫧 进入泡泡世界', '#a8edea')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+    <div class="app-icon !w-12 !h-12 bg-white/20 backdrop-blur-md border border-white/30"><i class="fas fa-magic sys-text opacity-70"></i></div><span class="app-name !text-[10px]">泡泡世界</span>
+</div>
+                    </div>
+                    <div @click="showToast('敬请期待')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+                        <div class="app-icon !w-12 !h-12 bg-white/20 backdrop-blur-md border border-white/30"><img v-if="store.customIcons.pendingB" :src="store.customIcons.pendingB" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-compass sys-text opacity-70"></i></div><span class="app-name !text-[10px]">待定 B</span>
+                    </div>
+                    <div @click="showToast('敬请期待')" class="flex flex-col items-center gap-1.5 cursor-pointer">
+                        <div class="app-icon !w-12 !h-12 bg-white/20 backdrop-blur-md border border-white/30"><img v-if="store.customIcons.pendingC" :src="store.customIcons.pendingC" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-gamepad sys-text opacity-70"></i></div><span class="app-name !text-[10px]">待定 C</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex justify-center gap-3 py-3 shrink-0 relative z-50">
+            <div @click="homePage = 0" class="w-2.5 h-2.5 rounded-full transition-colors cursor-pointer shadow-sm" :class="homePage === 0 ? 'sys-bg' : 'bg-gray-400/30'"></div>
+            <div @click="homePage = 1" class="w-2.5 h-2.5 rounded-full transition-colors cursor-pointer shadow-sm" :class="homePage === 1 ? 'sys-bg' : 'bg-gray-400/30'"></div>
+        </div>
+
+        <!-- 底栏 Dock -->
+        <div class="shrink-0 w-full px-4 pb-6 relative z-50">
+            <div class="dock-container w-full h-[85px] bg-white/30 backdrop-blur-2xl rounded-[35px] flex justify-around items-center border border-white/40 shadow-[0_10px_40px_rgba(0,0,0,0.15)]">
+                <div @click="openApp('chatApp')" class="flex flex-col items-center -translate-y-0.5 cursor-pointer">
+                    <div class="app-icon !w-14 !h-14 bg-gradient-to-b from-green-400 to-green-500 shadow-md"><img v-if="store.customIcons.chatApp" :src="store.customIcons.chatApp" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-comment-dots"></i></div>
+                </div>
+                <div @click="openApp('period')" class="flex flex-col items-center -translate-y-0.5 cursor-pointer">
+                    <div class="app-icon !w-14 !h-14 bg-gradient-to-b from-rose-400 to-rose-600 shadow-md"><img v-if="store.customIcons.period" :src="store.customIcons.period" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-tint"></i></div>
+                </div>
+                <div @click="openApp('api')" class="flex flex-col items-center -translate-y-0.5 cursor-pointer">
+                    <div class="app-icon !w-14 !h-14 bg-gradient-to-b from-slate-500 to-slate-700 shadow-md"><img v-if="store.customIcons.api" :src="store.customIcons.api" class="absolute inset-0 w-full h-full object-cover z-20" style="border-radius: inherit;"><i v-else class="fas fa-cog"></i></div>
+                </div>
+            </div>
+        </div>
+    </div>
+<!-- ================= 丢失的 Diary App (日记) 找回 ================= -->
+    <div v-else-if="currentApp === 'diary'" class="app-layout bg-[#fffbf0]">
+        <header class="app-header bg-[#fffbf0]/95 border-b border-[#e6e0d0]">
+            <div @click="goHome" class="w-8 flex items-center cursor-pointer"><i class="fas fa-chevron-left text-xl text-[#8b5e3c]"></i></div>
+            <div class="flex bg-[#ede6d4] rounded-full p-1">
+                <button @click="diaryTab='record'" class="px-4 py-1 rounded-full text-xs font-bold transition-all" :class="diaryTab==='record'?'bg-[#8b5e3c] text-white shadow-sm':'text-[#8b5e3c]'">记录</button>
+                <button @click="diaryTab='calendar'" class="px-4 py-1 rounded-full text-xs font-bold transition-all" :class="diaryTab==='calendar'?'bg-[#8b5e3c] text-white shadow-sm':'text-[#8b5e3c]'">日历</button>
+                <button @click="diaryTab='company'" class="px-4 py-1 rounded-full text-xs font-bold transition-all" :class="diaryTab==='company'?'bg-[#8b5e3c] text-white shadow-sm':'text-[#8b5e3c]'">陪伴</button>
+            </div>
+            <div class="w-8"></div>
+        </header>
+
+        <div v-if="diaryTab === 'record'" class="app-content p-4 flex flex-col h-full overflow-hidden">
+            <div class="bg-white rounded-2xl shadow-sm border border-[#e6e0d0] p-4 mb-4 shrink-0 flex flex-col">
+                <div class="flex justify-between items-center mb-3 border-b border-gray-100 pb-2">
+                    <div class="flex gap-2 items-center">
+                        <input type="date" v-model="diaryDateInput" class="text-xs font-bold text-gray-600 bg-gray-50 rounded px-2 py-1 outline-none border border-transparent focus:border-blue-300 transition">
+                        <input type="time" v-model="diaryTimeInput" class="text-xs font-bold text-gray-600 bg-gray-50 rounded px-2 py-1 outline-none border border-transparent focus:border-blue-300 transition">
+                    </div>
+                    <button @click="toggleWeather" class="w-8 h-8 rounded-full !bg-transparent !border-none flex items-center justify-center transition active:scale-90">
+    <i :class="[weatherMap[diaryWeather].icon, weatherMap[diaryWeather].color, 'text-lg transition-transform']"></i>
+</button>
+                </div>
+                <textarea v-model="diaryInput" class="w-full h-24 flex-1 resize-none outline-none text-gray-700 leading-relaxed bg-transparent placeholder-gray-300 text-sm" placeholder="记录今天发生的美好..."></textarea>
+                <div v-if="diaryImages.length > 0" class="flex gap-2 mt-2 overflow-x-auto pb-2">
+                    <div v-for="(img, idx) in diaryImages" :key="idx" class="w-16 h-16 shrink-0 rounded-lg overflow-hidden relative group">
+                        <img :src="img" class="w-full h-full object-cover">
+                        <button @click="diaryImages.splice(idx, 1)" class="absolute top-0 right-0 bg-black/50 text-white w-5 h-5 flex items-center justify-center text-xs"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-center mt-2 pt-2 border-t border-gray-100">
+                    <div class="flex gap-4 sys-text text-lg">
+    <button @click="$refs.globalDiaryImgInput.click()"><i class="far fa-image"></i></button>
+</div>
+                <button @click="saveDiary" class="sys-bg text-white px-6 py-2 rounded-full text-sm font-bold shadow-md active:scale-95 transition">发布</button>
+            </div> <!-- 这一行关闭底部操作栏 -->
+        </div> <!-- 👈 补上这一行！这是用来关闭那个白色的发布框卡片的 -->
+            <div class="flex-1 overflow-hidden flex flex-col">
+                <div class="text-xs font-bold text-[#8b5e3c] mb-2 opacity-50 px-2 flex justify-between">
+                    <span>时光轴</span><span>{{ store.diaryList.length }} 篇</span>
+                </div>
+                <div class="flex-1 overflow-y-auto px-2 pb-20 space-y-4">
+                    <div v-if="store.diaryList.length === 0" class="text-center text-gray-400 text-xs py-10">暂无记录</div>
+                    <div v-for="item in store.diaryList" :key="item.id" class="flex gap-3 relative">
+                        <div class="flex flex-col items-center w-6 shrink-0 pt-2"><div class="w-2.5 h-2.5 rounded-full bg-[#8b5e3c] z-10"></div><div class="w-0.5 flex-1 bg-[#e6e0d0] -mt-1 opacity-50"></div></div>
+                        <div class="flex-1 bg-white/70 backdrop-blur-sm p-3 rounded-xl border border-[#e6e0d0] text-sm text-gray-600 shadow-sm active:bg-white transition cursor-pointer">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="text-xs font-bold text-[#8b5e3c]">{{ item.date.split(' ')[0] }}</span>
+                                <i v-if="item.weather && weatherMap[item.weather]" :class="[weatherMap[item.weather].icon, weatherMap[item.weather].color, 'text-xs']"></i>
+                            </div>
+                            <p class="truncate line-clamp-2 opacity-80">{{ item.content }}</p>
+                            <div v-if="item.images && item.images.length" class="mt-2 flex gap-1">
+                                <img v-for="(img, i) in item.images.slice(0,3)" :key="i" :src="img" class="w-8 h-8 rounded object-cover border border-white shadow-sm">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div v-else-if="diaryTab === 'calendar'" class="app-content p-4 flex flex-col">
+            <div class="flex justify-between items-center mb-6 px-4">
+                <button @click="changeMonth(-1)" class="text-[#8b5e3c] cursor-pointer"><i class="fas fa-chevron-left"></i></button>
+                <div class="text-xl font-bold text-[#5c3d26]">{{ calendarDate.getFullYear() }}年 {{ calendarDate.getMonth() + 1 }}月</div>
+                <button @click="changeMonth(1)" class="text-[#8b5e3c] cursor-pointer"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div class="grid grid-cols-7 text-center mb-2 text-xs font-bold text-[#a0856c]">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+            </div>
+            <div class="grid grid-cols-7 gap-2">
+                <div v-for="(cell, i) in calendarGrid" :key="i" class="aspect-square rounded-lg overflow-hidden relative transition-transform active:scale-95" :class="cell.type==='empty' ? '' : 'bg-white shadow-sm border border-[#e6e0d0]'">
+                    <template v-if="cell.type === 'day'">
+                        <img v-if="cell.entry && cell.entry.images && cell.entry.images.length > 0" :src="cell.entry.images[0]" class="w-full h-full object-cover">
+                        <div v-else-if="cell.entry" class="w-full h-full bg-[#f0e6d2] flex items-center justify-center"><i class="fas fa-pen-nib text-[#d4c5a9]"></i></div>
+                        <div class="absolute top-1 left-0 w-full text-center text-[10px] font-bold" :class="(cell.entry && cell.entry.images && cell.entry.images.length > 0) ? 'text-white drop-shadow-md' : 'text-[#8b5e3c]'">{{ cell.day }}</div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <div v-else-if="diaryTab === 'company'" class="app-content p-6 space-y-6">
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-[#e6e0d0] relative overflow-hidden">
+                <div class="absolute top-0 right-0 p-3 opacity-10"><i class="fas fa-hourglass-half text-6xl text-[#8b5e3c]"></i></div>
+                <h3 class="text-[#8b5e3c] font-bold text-lg mb-2">时光胶囊</h3>
+                <div v-if="randomMemory">
+                    <p class="text-xs text-gray-400 mb-2">{{ new Date(randomMemory.id).toLocaleDateString() }}</p>
+                    <p class="text-gray-600 text-sm leading-relaxed italic">"{{ randomMemory.content }}"</p>
+                </div>
+                <div v-else class="text-gray-400 text-sm py-4 text-center">写下第一篇日记，开启时空之旅...</div>
+            </div>
+        </div>
+    </div>
+<!-- ================= 2. Chat App (完整版) ================= -->
+    <div v-else-if="currentApp === 'chatApp'" class="app-layout">
+        <!-- 只有在没进入具体聊天室时，才显示 列表、通讯录和“我” -->
+        <div v-if="!currentChatId" class="flex flex-col h-full overflow-hidden">
+            <!-- 头部：根据 Tab 切换标题 -->
+            <header class="app-header">
+                <div @click="goHome" class="w-8 flex items-center cursor-pointer"><i class="fas fa-chevron-left text-xl text-slate-600"></i></div>
+                <div class="font-bold text-lg text-slate-800">
+                    {{ activeTab === 0 ? '消息' : (activeTab === 1 ? '通讯录' : '个人中心') }}
+                </div>
+                <div class="w-8 flex justify-end">
+                    <button v-if="activeTab === 0" @click="toggleEditMode" class="text-blue-500"><i class="fas" :class="isEditMode ? 'fa-check' : 'fa-pen'"></i></button>
+                </div>
+            </header>
+
+            <!-- 中间内容区 -->
+            <main class="flex-1 overflow-y-auto pb-20">
+                <!-- Tab 0: 消息列表 -->
+                <div v-if="activeTab === 0" class="animate-fade-in">
+                    <div v-if="(store.activeChats ||[]).length === 0" class="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <i class="far fa-comments text-4xl mb-2"></i><p>暂无会话</p>
+                    </div>
+                    <div v-for="chat in sortedActiveChats" :key="chat.id" class="relative overflow-hidden border-b border-gray-100 select-none bg-white">
+                        <div v-if="!isEditMode" class="absolute inset-y-0 right-0 flex h-full"><button @click.stop="togglePinChat(chat)" class="w-[60px] text-white text-sm font-bold bg-blue-400 flex items-center justify-center">{{ chat.isPinned ? '取消' : '置顶' }}</button><button @click.stop="deleteChatSession(chat.id)" class="bg-red-500 w-[60px] text-white text-sm font-bold flex items-center justify-center">删除</button></div>
+                        <div @click="enterChat(chat.id)" @touchstart="!isEditMode && handleChatTouchStart($event)" @touchend="(e)=>!isEditMode && handleChatTouchEnd(e, chat.id)" class="relative bg-white flex items-center px-4 py-4 transition-transform duration-300 ease-out z-10 cursor-pointer" :style="(swipedChatId === chat.id && !isEditMode) ? 'transform: translateX(-120px)' : 'transform: translateX(0)'">
+                            <div class="w-12 h-12 rounded-lg bg-gray-200 mr-3 overflow-hidden shrink-0"><img :src="chat.avatar || defaultDogAvatar" class="w-full h-full object-cover"></div>
+                            <div class="flex-1 min-w-0"><div class="flex justify-between items-center mb-1"><h3 class="font-bold text-base truncate">{{ chat.name }}</h3><span class="text-xs opacity-50">{{ chat.lastTime }}</span></div><p class="text-sm opacity-60 truncate">{{ chat.lastMsg || '点击开始聊天' }}</p></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 1: 通讯录 (新增) -->
+                <div v-else-if="activeTab === 1" class="animate-fade-in bg-white">
+                    <div class="p-2 space-y-1">
+                        <div @click="createNewRole" class="flex items-center p-3 gap-3 active:bg-gray-100 cursor-pointer rounded-lg transition">
+                            <div class="w-10 h-10 bg-orange-500 text-white rounded flex items-center justify-center shadow-sm"><i class="fas fa-user-plus"></i></div>
+                            <span class="font-bold text-slate-700">新建角色设定</span>
+                        </div>
+                        <div @click="openAddMenu" class="flex items-center p-3 gap-3 active:bg-gray-100 cursor-pointer rounded-lg transition">
+                            <div class="w-10 h-10 bg-green-500 text-white rounded flex items-center justify-center shadow-sm"><i class="fas fa-file-import"></i></div>
+                            <span class="font-bold text-slate-700">导入角色卡 (PNG/JSON)</span>
+                        </div>
+                    </div>
+                    <div class="px-4 py-1 bg-gray-50 text-[10px] font-bold text-gray-400 uppercase">我的角色 ({{store.roleList.length}})</div>
+                    <div v-for="(role, idx) in store.roleList" :key="idx" class="flex items-center px-4 py-3 border-b border-gray-50 active:bg-gray-50 transition cursor-pointer">
+                        <div @click.stop="openEditRole(role, idx)" class="w-12 h-12 rounded-full overflow-hidden mr-3 border border-gray-100 shadow-sm shrink-0">
+                            <img :src="role.avatar || defaultDogAvatar" class="w-full h-full object-cover">
+                        </div>
+                        <div class="flex-1 min-w-0" @click="startChatFromContact(role)">
+                            <div class="font-bold text-slate-800">{{ role.name }}</div>
+                            <div class="text-xs text-gray-400 truncate">{{ role.prompt || '暂无设定描述' }}</div>
+                        </div>
+                        <button @click.stop="openEditRole(role, idx)" class="text-gray-300 p-2"><i class="fas fa-edit"></i></button>
+                    </div>
+                </div>
+
+                <!-- Tab 3: “我” (个人中心 - 新增) -->
+                <div v-else-if="activeTab === 3" class="animate-fade-in">
+                    <div class="bg-white px-6 py-8 flex flex-col items-center mb-4 border-b border-gray-100">
+                        <div class="relative group mb-4">
+                            <div class="w-24 h-24 rounded-full overflow-hidden border-4 border-white shadow-lg">
+                                <img :src="store.user.avatar || defaultCatAvatar" class="w-full h-full object-cover">
+                            </div>
+                            <button @click="$refs.userAvatarInput.click()" class="absolute bottom-0 right-0 bg-blue-500 text-white w-8 h-8 rounded-full border-2 border-white flex items-center justify-center shadow-md">
+                                <i class="fas fa-camera text-xs"></i>
+                            </button>
+                        </div>
+                        <input v-model="store.user.name" class="text-xl font-bold text-center bg-transparent outline-none border-b-2 border-transparent focus:border-blue-200 px-2" placeholder="你的名字">
+                    </div>
+                    <div class="px-4 space-y-4">
+                        <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                            <label class="block text-[10px] font-bold text-gray-400 mb-2 uppercase tracking-wider">我的个人设定 (Persona)</label>
+                            <textarea v-model="store.user.prompt" class="w-full h-32 bg-gray-50 rounded-xl p-3 text-sm outline-none resize-none focus:ring-2 ring-blue-100 border border-gray-100" placeholder="描述你自己，AI 会根据这个设定来对待你..."></textarea>
+                            <div class="flex justify-end mt-2">
+                                <button @click="saveAllManual" class="text-xs bg-blue-500 text-white px-6 py-2 rounded-full font-bold shadow-md active:scale-95 transition">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- 底部 Tab 栏 -->
+            <div class="tab-bar absolute bottom-0 left-0 right-0 h-[65px] bg-white/90 backdrop-blur-md border-t flex items-center z-20">
+                <div class="flex-1 flex flex-col items-center justify-center cursor-pointer transition" :class="activeTab===0?'text-blue-500 font-bold':'text-gray-400'" @click="activeTab=0"><i class="fas fa-comment text-xl"></i><span class="text-[10px] mt-0.5">消息</span></div>
+                <div class="flex-1 flex flex-col items-center justify-center cursor-pointer transition" :class="activeTab===1?'text-blue-500 font-bold':'text-gray-400'" @click="activeTab=1"><i class="fas fa-address-book text-xl"></i><span class="text-[10px] mt-0.5">通讯录</span></div>
+                <div class="flex-1 flex flex-col items-center justify-center cursor-pointer transition" :class="activeTab===3?'text-blue-500 font-bold':'text-gray-400'" @click="activeTab=3"><i class="fas fa-user text-xl"></i><span class="text-[10px] mt-0.5">我</span></div>
+            </div>
+        </div>
+
+<!-- 聊天对话窗口 (进入聊天后显示) -->
+        <div v-if="currentChatId" class="absolute inset-0 z-50 flex flex-col animate-fade-in" style="background: transparent;">
+            
+            <!-- 1. 顶部悬浮导航栏 -->
+            <header class="pt-12 pb-3 px-4 flex items-center justify-between relative z-20">
+                <!-- 左侧返回按钮 -->
+                <div @click="exitChat" class="w-10 h-10 rounded-full bg-white/60 backdrop-blur-md shadow-sm border border-white/50 flex items-center justify-center cursor-pointer active:scale-90 transition-transform sys-text text-lg">
+                    <i class="fas fa-chevron-left"></i>
+                </div>
+                <!-- 中间名字与状态 -->
+                <div class="flex-1 flex flex-col items-center justify-center">
+                    <div class="font-bold text-lg sys-text tracking-wide drop-shadow-sm">{{ currentChatData.name }}</div>
+                    <div class="text-[10px] sys-text opacity-70 font-bold mt-0.5">正在输入中...</div>
+                </div>
+                <!-- 右侧加号按钮 (修复了这里的 showToast) -->
+                <div @click="showToast('菜单功能开发中')" class="w-10 h-10 rounded-full bg-white/60 backdrop-blur-md shadow-sm border border-white/50 flex items-center justify-center cursor-pointer active:scale-90 transition-transform sys-text text-lg">
+                    <i class="fas fa-plus"></i>
+                </div>
+            </header>
+
+            <!-- 2. 聊天消息区 -->
+            <main ref="chatBox" class="flex-1 overflow-y-auto px-4 py-2 space-y-6 pb-4">
+                <template v-for="(msg, i) in currentChatData.messages" :key="i">
+                    <div v-if="msg.role !== 'system'" class="flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                        <div v-if="msg.role === 'assistant'" class="w-10 h-10 rounded-full bg-white mr-2 shrink-0 overflow-hidden shadow-sm border-2 border-white/50"><img :src="currentChatData.avatar || defaultDogAvatar" class="w-full h-full object-cover"></div>
+                        
+                        <div class="max-w-[75%]"><div class="text-base break-words shadow-sm leading-relaxed p-3" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-ai'">{{ msg.content }}</div></div>
+                        
+                        <div v-if="msg.role === 'user'" class="w-10 h-10 rounded-full bg-white ml-2 shrink-0 overflow-hidden shadow-sm border-2 border-white/50"><img :src="store.user.avatar || defaultCatAvatar" class="w-full h-full object-cover"></div>
+                    </div>
+                </template>
+            </main>
+
+            <!-- 3. 底部悬浮输入面板 -->
+            <div class="flex flex-col bg-white/50 backdrop-blur-2xl border-t border-white/60 rounded-t-[35px] shadow-[0_-5px_25px_rgba(0,0,0,0.05)] z-50 relative pb-safe">
+                <!-- 第一行：输入与按钮 -->
+                <div class="px-4 py-3 flex items-center gap-3">
+                    <!-- 左侧呼出面板按钮 -->
+                    <button @click="showChatPanel = !showChatPanel" class="w-10 h-10 shrink-0 rounded-full bg-white shadow-sm border border-white/80 sys-text flex items-center justify-center transition-transform active:scale-90 text-lg">
+                        <i class="fas" :class="showChatPanel ? 'fa-times' : 'fa-plus'"></i>
+                    </button>
+                    
+                    <!-- 中间输入框 -->
+                    <input v-model="inputText" @keydown.enter="sendText" class="flex-1 bg-white/80 border-2 border-white rounded-full px-4 py-2 outline-none sys-text shadow-inner transition placeholder-gray-400 font-bold text-sm" placeholder="说点什么...">
+                    
+                    <!-- 右侧两个果冻泡泡按钮 (修复了这里的 showToast) -->
+                    <div class="flex gap-2 shrink-0">
+                        <button @click="showToast('魔法功能开发中')" class="w-10 h-10 rounded-full sys-bg text-white shadow-md border border-white/40 flex items-center justify-center transition-transform active:scale-90">
+                            <i class="fas fa-magic text-sm"></i>
+                        </button>
+                        <button @click="sendText" class="w-10 h-10 rounded-full sys-bg text-white shadow-md border border-white/40 flex items-center justify-center transition-transform active:scale-90">
+                            <i class="fas fa-paper-plane text-sm translate-x-[-1px] translate-y-[1px]"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 第二行：下拉展开抽屉 -->
+                <div class="overflow-hidden transition-all duration-300 ease-in-out" :style="showChatPanel ? 'max-height: 200px; opacity: 1;' : 'max-height: 0px; opacity: 0;'">
+                    <div class="p-4 pt-0 grid grid-cols-4 gap-y-4 justify-items-center">
+                        <div @click="$refs.globalChatImgInput.click()" class="flex flex-col items-center gap-1.5 cursor-pointer group">
+                            <div class="w-12 h-12 rounded-full bg-white shadow-sm border border-white/50 flex items-center justify-center sys-text group-active:scale-90 transition-transform"><i class="far fa-image text-xl"></i></div>
+                            <span class="text-[10px] sys-text opacity-70 font-bold">发照片</span>
+                        </div>
+                        <!-- 这里生成了另外7个占位符 (修复了这里的 showToast) -->
+                        <div @click="showToast('敬请期待')" v-for="i in 7" :key="i" class="flex flex-col items-center gap-1.5 cursor-pointer group">
+                            <div class="w-12 h-12 rounded-full bg-white shadow-sm border border-white/50 flex items-center justify-center sys-text group-active:scale-90 transition-transform"><i class="fas fa-star text-xl opacity-30"></i></div>
+                            <span class="text-[10px] sys-text opacity-70 font-bold">待开发</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    <!-- ================= 3. API & Config ================= -->
+    <div v-else-if="currentApp === 'api'" class="app-layout bg-[#f2f2f7]">
+        <header class="app-header">
+            <button @click="goHome" class="text-blue-500 font-medium w-20 text-left flex items-center cursor-pointer"><i class="fas fa-chevron-left mr-1"></i> 返回</button>
+            <h1 class="flex-1 text-center font-bold text-lg text-slate-800">API 设置</h1>
+            <div class="w-20"></div>
+        </header>
+        <div class="app-content p-4 space-y-6 overflow-y-auto">
+            <div class="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-200">
+                <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider">连接配置</div>
+                <div class="p-4 space-y-4">
+                    <div><label class="text-sm font-bold text-slate-700">接口地址 (Proxy)</label><input v-model="store.api.baseUrl" class="w-full bg-gray-50 border border-gray-200 text-sm rounded-lg px-3 py-2.5 outline-none mt-1"></div>
+                    <div><label class="text-sm font-bold text-slate-700">API Key</label><input v-model="store.api.key" type="password" class="w-full bg-gray-50 border border-gray-200 text-sm rounded-lg px-3 py-2.5 outline-none mt-1"></div>
+                </div>
+            </div>
+<button @click="saveAllManual" class="w-full bg-blue-500 py-3.5 rounded-xl font-bold shadow-lg">保存配置</button>
+        </div>
+    </div>
+
+<!-- ================= 4. Period App (实装功能完整版) ================= -->
+    <div v-else-if="currentApp === 'period'" class="app-layout bg-[#fff0f3]">
+        <header class="app-header">
+            <button @click="goHome" class="text-rose-500 font-medium w-16 text-left cursor-pointer"><i class="fas fa-chevron-left"></i> 返回</button>
+            <div class="flex-1 text-center font-bold text-lg text-rose-800">{{ currentYear }}年 {{ currentMonth + 1 }}月</div>
+            <button @click="showSettings = true" class="text-rose-500 w-16 text-right cursor-pointer"><i class="fas fa-cog"></i></button>
+        </header>
+
+        <div class="app-content flex flex-col h-full relative z-10">
+            <!-- 切换月份 -->
+            <div class="flex justify-between items-center px-8 py-4">
+                <button @click="changeMonth(-1)" class="w-10 h-10 rounded-full bg-white text-rose-400 shadow-sm cursor-pointer active:scale-95 transition"><i class="fas fa-chevron-left"></i></button>
+                <div class="text-xs text-rose-400 font-bold bg-white px-4 py-2 rounded-full shadow-sm">点击圆圈记录当天</div>
+                <button @click="changeMonth(1)" class="w-10 h-10 rounded-full bg-white text-rose-400 shadow-sm cursor-pointer active:scale-95 transition"><i class="fas fa-chevron-right"></i></button>
+            </div>
+
+            <!-- 星期头 -->
+            <div class="grid grid-cols-7 text-center text-xs font-bold text-rose-300 mb-2 px-2">
+                <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
+            </div>
+
+            <!-- 日历动态网格 -->
+            <div class="period-grid px-2">
+                <div v-for="(day, i) in calendarDays" :key="i" 
+                     class="period-day" 
+                     :class="[
+                        day.type, 
+                        {'is-today': day.isToday}, 
+                        {'recorded': day.isRecorded}, 
+                        {'predicted': day.isPredicted && !day.isRecorded},
+                        {'ovulation': day.isOvulation && !day.isRecorded && !day.isPredicted}
+                     ]"
+                     @click="toggleDate(day)">
+                    
+                    <span v-if="day.type === 'day'">{{ day.day }}</span>
+                    
+                    <!-- 状态图标 -->
+                    <i v-if="day.isRecorded" class="fas fa-tint drop-icon text-white"></i>
+                    <i v-else-if="day.isPredicted" class="fas fa-tint drop-icon text-rose-300 opacity-50"></i>
+                    <i v-else-if="day.isOvulation" class="fas fa-seedling drop-icon text-blue-300"></i>
+                </div>
+            </div>
+
+            <!-- 图例说明与底部卡片 -->
+            <div class="mt-6 px-6 space-y-3">
+                <div class="flex items-center gap-3 bg-white p-3 rounded-xl shadow-sm">
+                    <div class="w-4 h-4 rounded-full bg-[#ff758c]"></div><span class="text-sm text-gray-600 font-bold">大姨妈 (你记录的)</span>
+                </div>
+                <div class="flex items-center gap-3 bg-white p-3 rounded-xl shadow-sm">
+                    <div class="w-4 h-4 rounded-full bg-[#ffe3e3] border border-dashed border-rose-300"></div><span class="text-sm text-gray-600 font-bold">预测经期 (自动推算)</span>
+                </div>
+                <div class="flex items-center gap-3 bg-white p-3 rounded-xl shadow-sm">
+                    <div class="w-4 h-4 rounded-full bg-[#e0f2fe] border border-blue-200"></div><span class="text-sm text-gray-600 font-bold"> 排卵期</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 周期设置弹窗 -->
+        <div v-if="showSettings" class="absolute inset-0 bg-black/50 z-50 flex items-center justify-center p-6" @click.self="showSettings=false">
+            <div class="bg-white w-full max-w-xs rounded-2xl p-6 shadow-2xl animate-bounce-in">
+                <h3 class="font-bold text-center text-lg mb-6 text-slate-700">周期设置</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">月经周期 (天)</label>
+                        <input v-model.number="store.period.settings.cycleLength" type="number" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 outline-none text-rose-500 font-bold text-center">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">经期长度 (天)</label>
+                        <input v-model.number="store.period.settings.periodLength" type="number" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 outline-none text-rose-500 font-bold text-center">
+                    </div>
+                </div>
+                <button @click="saveSettings" class="w-full bg-rose-500 text-white font-bold py-3 rounded-xl mt-6 shadow-md active:scale-95 transition cursor-pointer">保存并重新预测</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 5. Theme App (究极修复版：带CSS和自定义图标) ================= -->
+<div v-else-if="currentApp === 'theme'" class="app-layout bg-slate-50">
+        <header class="app-header">
+            <button @click="goHome" class="text-blue-500 font-medium w-20 text-left flex items-center cursor-pointer"><i class="fas fa-chevron-left mr-1"></i> 返回</button>
+            <h1 class="flex-1 text-center font-bold text-lg text-slate-800">个性化定制</h1>
+            <div class="w-20"></div>
+        </header>
+
+        <div class="app-content p-4 space-y-6 overflow-y-auto">
+            <!-- 1. 预设选择区 -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <label class="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">官方主题预设</label>
+                <div class="flex gap-2 mb-4">
+                    <select v-model="presetSelect.theme" class="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none">
+                        <option :value="-1">-- 选择预设 --</option>
+                        <option v-for="(p, idx) in store.presets.theme" :key="idx" :value="idx">{{ p.name }}</option>
+                    </select>
+                <button @click="loadPreset('theme')" class="bg-blue-500 px-4 py-2 rounded-xl font-bold text-sm active:scale-95 transition">应用</button>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="restoreThemePresets" class="flex-1 py-2 text-xs font-bold text-orange-500 bg-orange-50 rounded-lg border border-orange-100">重置官方预设</button>
+                    <button @click="clearAllBrowserMemory" class="flex-1 py-2 text-xs font-bold text-red-500 bg-red-50 rounded-lg border border-red-100">彻底格式化全站</button>
+                </div>
+            </div>
+
+            <!-- 2. 壁纸设置 -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <label class="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">桌面背景设置</label>
+                <div class="space-y-3">
+                    <button @click="$refs.globalCssInput.click()" class="w-full py-3 bg-slate-800 text-white rounded-xl font-bold flex items-center justify-center gap-2">
+                        <i class="fas fa-file-code"></i> 导入自定义 CSS 文件
+                    </button>
+                    <div class="flex gap-2">
+<button @click="$refs.widget1Input.click()" style="background-color: #089cffb0 !important;" class="flex-1 py-3">上传本地壁纸</button>
+<button @click="store.theme.bgImage = ''" style="background-color: #089cffad !important;" class="flex-1 py-3">恢复默认</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. 图标美化 -->
+            <div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <label class="block text-xs font-bold text-gray-400 mb-3 uppercase tracking-wider">App 图标自定义 (点击更换)</label>
+                <div class="grid grid-cols-4 gap-4">
+                    <div @click="triggerIconUpload('chatApp')" class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200">
+                            <img v-if="store.customIcons.chatApp" :src="store.customIcons.chatApp" class="w-full h-full object-cover">
+                            <i v-else class="fas fa-comment text-slate-400"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-gray-500">聊天</span>
+                    </div>
+                    <div @click="triggerIconUpload('diary')" class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200">
+                            <img v-if="store.customIcons.diary" :src="store.customIcons.diary" class="w-full h-full object-cover">
+                            <i v-else class="fas fa-book text-slate-400"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-gray-500">日记</span>
+                    </div>
+                    <div @click="triggerIconUpload('world')" class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200">
+                            <img v-if="store.customIcons.world" :src="store.customIcons.world" class="w-full h-full object-cover">
+                            <i v-else class="fas fa-globe text-slate-400"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-gray-500">世界</span>
+                    </div>
+                    <div @click="clearAllCustomIcons" class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center border border-red-100">
+                            <i class="fas fa-undo text-red-400"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-red-400">重置</span>
+                    </div>
+                </div>
+            </div>
+            
+            <p class="text-center text-[10px] text-gray-300">Chat OS v2.0 Modular System</p>
+        </div>
+    </div>
+<!-- ================= 5.5 泡泡世界 App ================= -->
+    <div v-else-if="currentApp === 'bubbleApp'" class="app-layout bg-[#fff0f3]">
+        <header class="app-header">
+            <button @click="currentApp = 'home'" class="text-blue-500 font-medium w-20 text-left flex items-center cursor-pointer">返回</button>
+            <h1 class="flex-1 text-center font-bold text-lg text-slate-800">泡泡世界</h1>
+            <div class="w-20"></div>
+        </header>
+        <div class="app-content flex items-center justify-center h-full">
+            <div class="bubble-card">
+                <h2 style="color: #3a3a6e; margin-bottom: 20px;">点击按钮，感受Q弹！</h2>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <button class="b-btn btn-a" @click="handleBubblePop($event, '🌿 清新！', '#96e6a1')">🌱 自然</button>
+                    <button class="b-btn btn-b" @click="handleBubblePop($event, '🌊 深海！', '#a1c4fd')">🫐 蓝调</button>
+                    <button class="b-btn btn-c" @click="handleBubblePop($event, '🌸 梦幻！', '#fbc2eb')">🌸 樱花</button>
+                    <button class="b-btn btn-d" @click="handleBubblePop($event, '☀️ 暖阳！', '#ffecd2')">🍑 蜜桃</button>
+                    <button class="b-btn btn-wide" @click="handleBubblePop($event, '💥 炸裂！', '#a8edea', true)">泡泡大爆炸</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= 6. World App (世界书) ================= -->
+    <div v-else-if="currentApp === 'world'" class="app-layout bg-[#f8fafc]">
+        <input id="hidden-world-input" type="file" accept=".json" class="hidden-input" @change="importWorldFile">
+        <header class="app-header">
+            <button v-if="worldCurrentView === 'home'" @click="goHome" class="text-blue-500 font-medium w-20 text-left flex items-center cursor-pointer"><i class="fas fa-chevron-left mr-1"></i> 返回</button>
+            <button v-else @click="goWorldHome" class="text-blue-500 font-medium w-20 text-left flex items-center cursor-pointer"><i class="fas fa-chevron-left mr-1"></i> 世界</button>
+            <h1 class="flex-1 text-center font-bold text-lg text-slate-800 truncate px-2">{{ worldCurrentView === 'home' ? '世界书' : (worldCurrentView === 'global' ? '全局世界书' : '角色世界书') }}</h1>
+            <div class="relative w-20 flex justify-end">
+                <div v-if="worldCurrentView !== 'home'" class="paw-btn" @click.stop="showWorldMenu = !showWorldMenu"><i class="fas fa-paw"></i></div>
+                <div v-if="showWorldMenu" class="paw-menu" @click.stop>
+                    <div @click="handleWorldMenu('new')" class="paw-menu-item"><i class="fas fa-plus text-blue-400"></i> 新建设定</div>
+                    <div @click="handleWorldMenu('import')" class="paw-menu-item"><i class="fas fa-file-import text-green-400"></i> 导入文件</div>
+                    <div @click="handleWorldMenu('batch')" class="paw-menu-item" :class="{'bg-red-50 text-red-500': isWorldBatchMode}"><i class="fas fa-check-square text-orange-400"></i> {{ isWorldBatchMode ? '退出管理' : '批量管理' }}</div>
+                </div>
+                <div v-if="showWorldMenu" class="fixed inset-0 z-50" style="background:transparent" @click="showWorldMenu = false"></div>
+            </div>
+        </header>
+        <div class="app-content p-4 overflow-y-auto relative">
+            <div v-if="worldCurrentView === 'home'" class="space-y-3 animate-fade-in">
+                <div @click="goWorldGlobal" class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer active:scale-95 transition">
+                    <div class="flex items-center gap-4"><div class="w-12 h-12 rounded-full bg-blue-100 text-blue-500 flex items-center justify-center text-xl"><i class="fas fa-globe"></i></div><div><div class="font-bold text-slate-700 text-base">全局</div><div class="text-xs text-gray-400 mt-0.5">所有角色共通的设定</div></div></div><i class="fas fa-chevron-right text-gray-300"></i>
+                </div>
+                <div @click="goWorldRole" class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer active:scale-95 transition">
+                    <div class="flex items-center gap-4"><div class="w-12 h-12 rounded-full bg-purple-100 text-purple-500 flex items-center justify-center text-xl"><i class="fas fa-user-astronaut"></i></div><div><div class="font-bold text-slate-700 text-base">专属</div><div class="text-xs text-gray-400 mt-0.5">按照具体角色分类的世界书</div></div></div><i class="fas fa-chevron-right text-gray-300"></i>
+                </div>
+            </div>
+            <div v-else-if="worldCurrentView === 'global'" class="flex flex-col gap-3 pb-24 animate-fade-in">
+                <div v-if="globalWorldBooks.length === 0" class="text-center text-gray-400 py-20"><i class="fas fa-book-open text-4xl mb-2 opacity-30"></i><p class="text-xs">暂无全局设定，点右上角猫爪添加</p></div>
+                <div v-for="book in globalWorldBooks" :key="book.id" class="bg-white px-3 py-3 rounded-2xl shadow-sm border border-gray-100 transition-all relative" :class="{'border-blue-200 bg-blue-50': isWorldBatchMode && selectedWorldIds.includes(book.id)}">
+                    <div class="flex items-center gap-3">
+                        <div v-if="isWorldBatchMode" @click.stop="toggleSelection(book.id)" class="batch-checkbox cursor-pointer" :class="{checked: selectedWorldIds.includes(book.id)}"><i v-if="selectedWorldIds.includes(book.id)" class="fas fa-check text-xs"></i></div>
+                        <div v-else @click.stop="toggleWorldEntry(book)" class="w-6 h-6 rounded-full border flex items-center justify-center cursor-pointer transition-colors shrink-0" :class="book.enabled !== false ? 'bg-blue-500 border-blue-500' : 'border-gray-300 bg-gray-50'"><i v-if="book.enabled !== false" class="fas fa-check text-white text-[10px]"></i></div>
+                        <div class="flex-1 min-w-0 cursor-pointer" @click="isWorldBatchMode ? toggleSelection(book.id) : (book.expanded = !book.expanded)">
+                            <div class="flex items-center gap-2"><span class="font-bold text-sm text-slate-700" :class="{'opacity-40 line-through': book.enabled === false}">{{ book.name }}</span><span v-if="book.keys" class="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded truncate max-w-[100px] font-mono">#{{ book.keys }}</span></div>
+                            <div v-if="!book.expanded" class="text-[10px] text-gray-400 truncate mt-0.5">{{ book.content }}</div>
+                        </div>
+                        <button v-if="!isWorldBatchMode && !book.expanded" @click.stop="deleteWorldBook(book.id)" class="text-gray-300 hover:text-red-400 w-8 h-8 flex items-center justify-center"><i class="fas fa-trash-alt"></i></button>
+                    </div>
+                    <div v-if="book.expanded && !isWorldBatchMode" class="mt-3 pt-3 border-t border-gray-50 animate-fade-in">
+                        <div class="flex items-center gap-2 mb-2"><i class="fas fa-hashtag text-[10px] text-gray-400"></i><input v-model="book.keys" @change="saveAllManual" class="flex-1 text-xs border-b border-gray-200 outline-none py-1 text-blue-600 bg-transparent" placeholder="触发关键词"></div>
+                        <textarea v-model="book.content" @change="saveAllManual" rows="4" class="w-full text-xs bg-gray-50 p-2 rounded-xl border border-gray-200 resize-none outline-none font-mono text-gray-600" placeholder="内容..."></textarea>
+                        <div class="flex justify-between items-center mt-2"><span class="text-[10px] text-gray-300">{{ book.content ? book.content.length : 0 }} 字</span><button @click="book.expanded=false" class="text-xs text-blue-500 font-bold px-2 py-1">收起</button></div>
+                    </div>
+                </div>
+            </div>
+            <div v-else-if="worldCurrentView === 'role'" class="flex flex-col gap-3 pb-24 animate-fade-in">
+                <div v-if="(worldRoleList ||[]).length === 0" class="text-center text-gray-400 py-20"><i class="fas fa-users-slash text-4xl mb-2 opacity-30"></i><p class="text-xs">暂无角色记录</p></div>
+                <div v-for="role in worldRoleList" :key="role" class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all">
+                    <div @click="toggleRoleExpand(role)" class="p-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition">
+                        <div class="flex items-center gap-3"><div class="w-10 h-10 rounded-full bg-purple-100 text-purple-500 flex items-center justify-center font-bold text-lg">{{ role[0] }}</div><span class="font-bold text-slate-700">{{ role }}</span></div>
+                        <div class="flex items-center gap-2 text-gray-400 text-xs"><span>{{ getRoleWorldBooks(role).length }} 条</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 弹窗部分 -->
+    <div v-if="showAddMenu" class="absolute inset-0 z-[50] flex items-center justify-center bg-black/50 backdrop-blur-sm" @click.self="closeAddMenu">
+        <div class="bg-white w-64 rounded-xl shadow-2xl overflow-hidden flex flex-col animate-bounce-in">
+            <button class="p-4 border-b border-gray-100 text-blue-600 font-bold hover:bg-gray-50 transition" @click="$refs.globalCardInput.click(); closeAddMenu()">导入角色</button>
+            <button class="p-4 text-gray-500 hover:bg-gray-50 transition" @click="closeAddMenu">取消</button>
+        </div>
+    </div>
+    <!-- ================= 角色编辑弹窗 (Modal) ================= -->
+    <div v-if="showEditRoleModal" class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" @click.self="showEditRoleModal = false">
+        <div class="bg-white w-full max-w-md rounded-3xl overflow-hidden shadow-2xl animate-bounce-in flex flex-col max-h-[85vh]">
+            <div class="p-6 overflow-y-auto space-y-5">
+                <h3 class="text-center font-bold text-xl text-slate-800">{{ currentEditIndex === -1 ? '创建新角色' : '编辑角色信息' }}</h3>
+                
+                <div class="flex flex-col items-center py-2">
+                    <div class="relative">
+                        <div class="w-20 h-20 rounded-2xl overflow-hidden bg-gray-50 border-2 border-gray-100 shadow-inner">
+                            <img :src="tempEditRole.avatar || defaultDogAvatar" class="w-full h-full object-cover">
+                        </div>
+                        <button @click="$refs.roleAvatarInput.click()" class="absolute -bottom-2 -right-2 bg-blue-500 text-white w-8 h-8 rounded-full border-2 border-white flex items-center justify-center shadow-md">
+                            <i class="fas fa-pencil-alt text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-400 uppercase ml-2 tracking-widest">角色名称</label>
+                        <input v-model="tempEditRole.name" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-blue-300 focus:bg-white transition" placeholder="例如：爱丽丝">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-gray-400 uppercase ml-2 tracking-widest">设定 (Prompt)</label>
+                        <textarea v-model="tempEditRole.prompt" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-blue-300 focus:bg-white transition h-40 resize-none text-sm leading-relaxed" placeholder="描述角色的性格、背景、说话习惯..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-6 bg-gray-50 flex gap-3">
+                <button v-if="currentEditIndex !== -1" @click="deleteEditRole" class="flex-1 bg-red-50 text-red-500 font-bold py-3 rounded-xl active:bg-red-100 transition">删除</button>
+                <button @click="showEditRoleModal = false" class="flex-1 bg-gray-200 text-gray-600 font-bold py-3 rounded-xl active:bg-gray-300 transition">取消</button>
+                <button @click="saveEditRole" class="flex-[2] bg-blue-600 text-white font-bold py-3 rounded-xl shadow-lg active:bg-blue-700 transition">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- 引入 JS -->
+<script type="module" src="js/app.js"></script>
+<script>
+document.addEventListener('click', (e) => {
+    // 只要点击的是带 app-icon 类名的，就触发爆炸
+    if (e.target.closest('.app-icon')) {
+        const btn = e.target.closest('.app-icon');
+        // 这里手动触发 Vue 的处理函数（假设您的 vue 实例叫 app）
+        // 如果上面报错，说明您不需要加这段，直接在 HTML 的 @click 里改是最稳的
+    }
+});
+</script>
+</body>
+</html>
